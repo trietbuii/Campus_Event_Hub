@@ -1,15 +1,13 @@
 import { useState } from "react"
 import type { Role } from "../App"
-import { useUser } from "../context/UserContext"
 import { useToast } from "../components/Toast"
-
-interface Props {
-  onLogin: (role: Role) => void
-}
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth"
+import { doc, setDoc } from "firebase/firestore"
+import { auth, db } from "@config/firebase"
 
 const DEMO_ACCOUNTS = [
   {
-    role: "student" as Role,
+    role: "student",
     label: "Sinh viên",
     name: "Nguyễn Văn A",
     email: "student@demo.edu.vn",
@@ -19,7 +17,7 @@ const DEMO_ACCOUNTS = [
     desc: "Khám phá và đăng ký sự kiện",
   },
   {
-    role: "organizer" as Role,
+    role: "organizer",
     label: "Ban tổ chức",
     name: "Ban Tổ Chức",
     email: "organizer@demo.edu.vn",
@@ -29,7 +27,7 @@ const DEMO_ACCOUNTS = [
     desc: "Quản lý sự kiện và báo cáo",
   },
   {
-    role: "student" as Role,
+    role: "student",
     label: "Sinh viên (CTV điểm danh)",
     name: "Cao Duy Anh",
     email: "checkin@demo.edu.vn",
@@ -41,52 +39,117 @@ const DEMO_ACCOUNTS = [
   },
 ]
 
+interface Props {
+  onLogin: (role: Role) => void
+}
+
 export default function Login({ onLogin }: Props) {
   const [tab, setTab] = useState<"login" | "register">("login")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [registerName, setRegisterName] = useState("")
   const [registerStudentId, setRegisterStudentId] = useState("")
+  const [phone, setPhone] = useState("")
+  const [faculty, setFaculty] = useState("Công nghệ Thông tin")
   const [remember, setRemember] = useState(false)
-  const [showRegister, setShowRegister] = useState(false)
+  const [loading, setLoading] = useState(false)
   
-  const { updateUser } = useUser()
   const { showToast } = useToast()
 
-  function fillDemo(account: typeof DEMO_ACCOUNTS[0]) {
-    setEmail(account.email)
-    setPassword(account.password)
-  }
-
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     
+    if (loading) return
+    
     if (tab === "register") {
-      updateUser({ 
-        name: registerName || "Người dùng", 
-        studentId: registerStudentId || "23520000",
-        email: email || "student@gm.uit.edu.vn",
-        role: "student"
-      })
-      showToast("Đăng ký thành công! Vui lòng đăng nhập.")
-      setTab("login")
+      if (password !== confirmPassword) {
+        showToast("Mật khẩu xác nhận không khớp", "error")
+        return
+      }
+      if (!registerName || !registerStudentId || !email) {
+        showToast("Vui lòng điền đầy đủ thông tin", "error")
+        return
+      }
+      
+      setLoading(true)
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+        const user = userCredential.user
+        
+        // Save additional user info to Firestore
+        await setDoc(doc(db, 'users', user.uid), {
+          name: registerName,
+          studentId: registerStudentId,
+          email: email,
+          phone: phone,
+          faculty: faculty,
+          role: "student", // default role for new registrations
+          createdAt: new Date().toISOString()
+        })
+        
+        showToast("Đăng ký thành công! Đang đăng nhập...")
+        onLogin("student")
+      } catch (error: any) {
+        console.error("Register error:", error)
+        if (error.code === 'auth/email-already-in-use') {
+          showToast("Email này đã được sử dụng", "error")
+        } else if (error.code === 'auth/weak-password') {
+          showToast("Mật khẩu quá yếu (cần ít nhất 6 ký tự)", "error")
+        } else {
+          showToast("Đăng ký thất bại: " + error.message, "error")
+        }
+      } finally {
+        setLoading(false)
+      }
       return
     }
 
-    if (email.includes("organizer") || email.includes("org")) {
-      updateUser({ name: "Ban Tổ Chức", email, role: "organizer" })
-      onLogin("organizer")
-    } else {
-      updateUser({ name: email.split("@")[0] || "Sinh viên", email, role: "student" })
-      onLogin("student")
+    // Login logic
+    if (!email || !password) {
+      showToast("Vui lòng nhập email và mật khẩu", "error")
+      return
+    }
+    
+    setLoading(true)
+    try {
+      await signInWithEmailAndPassword(auth, email, password)
+      // Note: onAuthStateChanged in UserContext will handle state updates,
+      // but we still call onLogin here so AppInner can navigate appropriately.
+      // AppInner will know the true role once UserContext resolves it,
+      // but we can temporarily pass 'student' (or guess based on email)
+      const guessedRole = (email.includes("organizer") || email.includes("org")) ? "organizer" : "student"
+      onLogin(guessedRole as Role)
+    } catch (error: any) {
+      console.error("Login error:", error)
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        showToast("Email hoặc mật khẩu không đúng", "error")
+      } else {
+        showToast("Đăng nhập thất bại: " + error.message, "error")
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
-  function handleDemoLogin(acc: typeof DEMO_ACCOUNTS[0]) {
-    if ('name' in acc && acc.name) {
-      updateUser({ name: acc.name as string, email: acc.email, role: acc.role })
+  async function handleDemoLogin(acc: typeof DEMO_ACCOUNTS[0]) {
+    if (loading) return
+    setLoading(true)
+    try {
+      await signInWithEmailAndPassword(auth, acc.email, acc.password)
+      onLogin(acc.role as Role)
+    } catch (error: any) {
+      console.error("Demo login error:", error)
+      if (error.code === 'auth/configuration-not-found') {
+        showToast("Bạn chưa bật tính năng Email/Password trong Firebase Console!", "error")
+      } else if (error.code === 'auth/invalid-credential') {
+        showToast("Tài khoản Demo chưa được tạo trên Firebase (Liên hệ kỹ thuật).", "error")
+      } else {
+        showToast("Đăng nhập Demo thất bại: " + error.message, "error")
+      }
+    } finally {
+      setLoading(false)
     }
-    onLogin(acc.role)
   }
 
   return (
@@ -235,6 +298,7 @@ export default function Login({ onLogin }: Props) {
               {(["login", "register"] as const).map((t) => (
                 <button
                   key={t}
+                  type="button"
                   onClick={() => setTab(t)}
                   className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all"
                   style={{
@@ -261,11 +325,11 @@ export default function Login({ onLogin }: Props) {
                   Đăng nhập để tiếp tục
                 </p>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} noValidate className="space-y-4">
                   <FormField
-                    label="Email / MSSV"
-                    type="text"
-                    placeholder="email@uit.edu.vn hoặc MSSV"
+                    label="Email"
+                    type="email"
+                    placeholder="email@uit.edu.vn"
                     value={email}
                     onChange={setEmail}
                   />
@@ -301,10 +365,15 @@ export default function Login({ onLogin }: Props) {
 
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-xl font-display font-semibold text-white transition-all hover:opacity-90 active:scale-[0.99]"
+                    disabled={loading}
+                    className="w-full py-3 flex items-center justify-center rounded-xl font-display font-semibold text-white transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed"
                     style={{ background: "#4f46e5" }}
                   >
-                    Đăng nhập
+                    {loading ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    ) : (
+                      "Đăng nhập"
+                    )}
                   </button>
                 </form>
 
@@ -314,6 +383,7 @@ export default function Login({ onLogin }: Props) {
                 >
                   Chưa có tài khoản?{" "}
                   <button
+                    type="button"
                     onClick={() => setTab("register")}
                     className="font-semibold"
                     style={{ color: "#4f46e5" }}
@@ -334,13 +404,15 @@ export default function Login({ onLogin }: Props) {
                   Điền thông tin sinh viên của bạn
                 </p>
 
-                <div className="space-y-3">
+                <form onSubmit={handleSubmit} noValidate className="space-y-3">
                   <FormField label="Họ và tên" placeholder="Nguyễn Văn A" value={registerName} onChange={setRegisterName} />
                   <div className="grid grid-cols-2 gap-3">
                     <FormField label="MSSV" placeholder="2252xxxx" value={registerStudentId} onChange={setRegisterStudentId} />
                     <FormField
                       label="Số điện thoại"
                       placeholder="09xx xxx xxx"
+                      value={phone}
+                      onChange={setPhone}
                     />
                   </div>
                   <FormField
@@ -358,6 +430,8 @@ export default function Login({ onLogin }: Props) {
                       Khoa / Viện
                     </label>
                     <select
+                      value={faculty}
+                      onChange={(e) => setFaculty(e.target.value)}
                       className="w-full px-3 py-2.5 rounded-xl border text-sm outline-none"
                       style={{ borderColor: "#e2e8f0", color: "#1a1a2e" }}
                     >
@@ -371,22 +445,31 @@ export default function Login({ onLogin }: Props) {
                   <FormField
                     label="Mật khẩu"
                     type="password"
-                    placeholder="Tối thiểu 8 ký tự"
+                    placeholder="Tối thiểu 6 ký tự"
+                    value={password}
+                    onChange={setPassword}
                   />
                   <FormField
                     label="Xác nhận mật khẩu"
                     type="password"
                     placeholder="Nhập lại mật khẩu"
+                    value={confirmPassword}
+                    onChange={setConfirmPassword}
                   />
-                </div>
 
-                <button
-                  className="w-full mt-5 py-3 rounded-xl font-display font-semibold text-white"
-                  style={{ background: "#4f46e5" }}
-                  onClick={handleSubmit}
-                >
-                  Đăng ký tài khoản
-                </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full mt-5 py-3 flex items-center justify-center rounded-xl font-display font-semibold text-white transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed"
+                    style={{ background: "#4f46e5" }}
+                  >
+                    {loading ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    ) : (
+                      "Đăng ký tài khoản"
+                    )}
+                  </button>
+                </form>
               </>
             )}
           </div>
@@ -414,7 +497,8 @@ export default function Login({ onLogin }: Props) {
                 <button
                   key={idx}
                   onClick={() => handleDemoLogin(acc)}
-                  className="w-full flex items-start gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:shadow-sm group"
+                  disabled={loading}
+                  className="w-full flex items-start gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:shadow-sm group disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ background: "white", borderColor: "#e2e8f0" }}
                 >
                   <div

@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { signOut } from 'firebase/auth';
+import { auth } from '@config/firebase';
 import { ToastProvider } from './components/Toast';
-import { UserProvider } from './context/UserContext';
+import { UserProvider, useUser } from './context/UserContext';
 import { AppProvider } from './context/AppContext';
 import Login from './pages/Login';
 import EventList from './pages/student/EventList';
@@ -19,25 +21,27 @@ import type { Ticket } from './types';
 export type Role = 'student' | 'organizer';
 
 function AppInner() {
-  const [role, setRole] = useState<Role | null>(null);
+  const { user, loading } = useUser();
   const [screen, setScreen] = useState('home');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [confirmedTicket, setConfirmedTicket] = useState<Ticket | null>(null);
 
   function handleLogin(r: Role) {
-    setRole(r);
     setScreen(r === 'organizer' ? 'org-dashboard' : 'home');
   }
 
-  function handleLogout() {
-    setRole(null);
+  async function handleLogout() {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout error", error);
+    }
     setScreen('home');
     setSelectedEventId(null);
     setConfirmedTicket(null);
   }
 
   function handleNavigate(s: string) {
-    // Map 'explore' from BottomNav to 'home' (EventList screen)
     setScreen(s === 'explore' ? 'home' : s);
   }
 
@@ -51,9 +55,19 @@ function AppInner() {
     setScreen('ticket-confirm');
   }
 
-  if (!role) {
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
     return <Login onLogin={handleLogin} />;
   }
+
+  const role = user.role as Role;
 
   if (role === 'student') {
     if (screen === 'event-detail' && selectedEventId) {

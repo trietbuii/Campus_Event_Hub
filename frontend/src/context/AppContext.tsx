@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { collection, doc, getDocs, setDoc, updateDoc, onSnapshot, increment } from 'firebase/firestore';
-import { db } from '@backend/firebase';
+import { db } from '@config/firebase';
 import { EVENTS } from '@data/mock';
 import type { Ticket, Topic } from '../types';
 import { INITIAL_NOTIFICATIONS, type Notification, type NotifType, type NotifAction } from '@data/notifications';
@@ -228,6 +228,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let unsubTickets = () => {};
 
     const init = async () => {
+      console.log("DB value inside useEffect:", db);
       const eventsRef = collection(db, 'events');
       const eventsSnap = await getDocs(eventsRef);
       if (eventsSnap.empty) {

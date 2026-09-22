@@ -11,9 +11,9 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(import.meta.dirname, './src'),
-      '@backend': path.resolve(import.meta.dirname, '../backend'),
-      '@data': path.resolve(import.meta.dirname, '../data'),
+      '@': path.resolve(__dirname, './src'),
+      '@config': path.resolve(__dirname, './src/config'),
+      '@data': path.resolve(__dirname, '../data'),
     },
   },
   server: {
